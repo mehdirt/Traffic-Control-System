@@ -175,3 +175,7 @@ cython_debug/
 
 # Pretrained models
 models/pretrained/*.pt
+
+# Sample Vidoes
+assets/*.mp4
+assets/*.mov
