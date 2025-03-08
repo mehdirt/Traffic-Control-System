@@ -1,4 +1,3 @@
-import os
 import argparse
 from pipeline import TrackingPipeline
 
@@ -32,7 +31,10 @@ def parse_arguments():
         type=float,
     )
     parser.add_argument(
-        "--iou_threshold", default=0.7, help="IOU threshold for the model", type=float
+        "--iou_threshold",
+        default=0.7,
+        help="IOU threshold for the model",
+        type=float,
     )
     return parser.parse_args()
 

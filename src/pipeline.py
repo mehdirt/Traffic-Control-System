@@ -27,7 +27,7 @@ class TrackingPipeline:
         # Model
         self.model = YOLO(source_weights_path)
         # Tracker
-        self.tracker = sv.ByteTrack()
+        self.tracker = sv.ByteTrack(frame_rate=TRACKING_CONFIG['frame_rate'])
         # Supervision Video Information
         self.video_info = sv.VideoInfo.from_video_path(source_video_path)
         # Box Annotator
@@ -40,12 +40,12 @@ class TrackingPipeline:
             color=ANNOTATION_CONFIG['color_palette'], text_color=sv.Color.BLACK
         )
         # Trace Annotator
-        self.trace_annotator = sv.TraceAnnotator(
-            color=ANNOTATION_CONFIG['color_palette'],
-            position=sv.Position.CENTER,
-            trace_length=100,
-            thickness=ANNOTATION_CONFIG['tracking_line_thickness'],
-        )
+        # self.trace_annotator = sv.TraceAnnotator(
+        #     color=ANNOTATION_CONFIG['color_palette'],
+        #     position=sv.Position.CENTER,
+        #     trace_length=100,
+        #     thickness=ANNOTATION_CONFIG['tracking_line_thickness'],
+        # )
 
     def process_video(self):
         """
@@ -93,19 +93,19 @@ class TrackingPipeline:
             )
         ]
 
-        annotated_frame = self.trace_annotator.annotate(
-            scene=annotated_frame,
-            detections=detections
-        )
-        annotated_frame = self.box_annotator.annotate(
-            scene=annotated_frame,
-            detections=detections
-        )
         annotated_frame = self.label_annotator.annotate(
             scene=annotated_frame,
             detections=detections,
             labels=labels
         )
+        annotated_frame = self.box_annotator.annotate(
+            scene=annotated_frame,
+            detections=detections
+        )
+        # annotated_frame = self.trace_annotator.annotate(
+        #     scene=annotated_frame,
+        #     detections=detections
+        # )
 
         return annotated_frame
     
@@ -124,7 +124,7 @@ class TrackingPipeline:
         """
         """
         results = self.model(
-            frame,
+            source=frame,
             verbose=False,
             conf=self.conf_threshold,
             iou=self.iou_threshold,
@@ -132,8 +132,7 @@ class TrackingPipeline:
         )[0]
         
         detections = sv.Detections.from_ultralytics(results)
-        detections.class_id = np.zeros(len(detections))
-        
+         
         detections = self.tracker.update_with_detections(detections)
         
         # Debug: Print detections structure
