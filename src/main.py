@@ -32,7 +32,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--iou_threshold",
-        default=0.7,
+        default=0.9,
         help="IOU threshold for the model",
         type=float,
     )
@@ -50,20 +50,5 @@ def main():
     )
     pipeline.process_video()
     
-    # cap = cv2.VideoCapture(args.source if args.source != "0" else 0)
-    # while cap.isOpened():
-    #     success, frame = cap.read()
-    #     if not success:
-    #         break
-        
-    #     processed_frame = pipeline.process_frame(frame)
-    #     cv2.imshow("Object Tracking", processed_frame)
-        
-    #     if cv2.waitKey(1) == ord("q"):
-    #         break
-    
-    # cap.release()
-    # cv2.destroyAllWindows()
-
 if __name__ == "__main__":
     main()

@@ -49,6 +49,8 @@ class TrackingPipeline:
         # )
         # Model color recognition
         self.color_model = ort.InferenceSession("models/custom/color_classifier.onnx")
+        # Track movement state per object
+        self.movement_status = {} 
 
     def process_video(self):
         """
@@ -88,10 +90,12 @@ class TrackingPipeline:
         annotated_frame = frame.copy()
 
         labels = [
-            f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id]} {color} {conf:.2f}"
+            f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id]} {color}"
+            f"{' <MOVING> ' if self.movement_status.get(track_id, False) else ' <STABLE> '}"
+            f"{conf:.2f}"
             for track_id, class_id, conf, color in zip(
                 detections.tracker_id, 
-                detections.class_id, 
+                detections.class_id,
                 detections.confidence,
                 colors,
             )
@@ -116,6 +120,7 @@ class TrackingPipeline:
     def update_tracking_history(self, detections: sv.Detections):
         """
         """
+        # Store object's id and center
         for tracker_id, [x1, y1, x2, y2] in zip(detections.tracker_id, detections.xyxy):
             center = ((x1 + x2) // 2, (y1 + y2) // 2)
             self.track_history.setdefault(tracker_id, []).append(center)
@@ -123,6 +128,18 @@ class TrackingPipeline:
             # Keep history length limited
             if len(self.track_history[tracker_id]) > ANNOTATION_CONFIG["tracking_history_length"]:
                 self.track_history[tracker_id].pop(0)
+            
+            # Calculate movement
+            if len(self.track_history[tracker_id]) >= 2:
+                first_point = self.track_history[tracker_id][0]
+                last_point = self.track_history[tracker_id][-1]
+                displacement = (
+                    (last_point[0] - first_point[0]) ** 2 +
+                    (last_point[0] - first_point[0]) ** 2
+                ) ** 0.5
+                self.movement_status[tracker_id] = displacement > TRACKING_CONFIG['displacement_threshhold']
+            else:
+                self.movement_status[tracker_id] = False 
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -142,16 +159,16 @@ class TrackingPipeline:
         colors = [
             self.predict_color(frame, box) 
             if self.is_vehicle(class_id) 
-            else "none"
+            else ""
             for box, class_id in zip(detections.xyxy, detections.class_id)
         ]
         
         # Debug: Print detections structure
-        print("Detections:", detections)
-        print("Tracker IDs:", detections.tracker_id)
-        print("Class IDs:", detections.class_id)
-        print("Confidence:", detections.confidence)
-        print("Bounding Boxes:", detections.xyxy)
+        # print("Detections:", detections)
+        # print("Tracker IDs:", detections.tracker_id)
+        # print("Class IDs:", detections.class_id)
+        # print("Confidence:", detections.confidence)
+        # print("Bounding Boxes:", detections.xyxy)
 
         # Update history
         self.update_tracking_history(detections)
