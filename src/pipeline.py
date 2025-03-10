@@ -120,7 +120,7 @@ class TrackingPipeline:
     def update_tracking_history(self, detections: sv.Detections):
         """
         """
-        # Store object's id and center
+        # Store object's id and centeroid
         for tracker_id, [x1, y1, x2, y2] in zip(detections.tracker_id, detections.xyxy):
             center = ((x1 + x2) // 2, (y1 + y2) // 2)
             self.track_history.setdefault(tracker_id, []).append(center)
@@ -140,6 +140,20 @@ class TrackingPipeline:
                 self.movement_status[tracker_id] = displacement > TRACKING_CONFIG['displacement_threshhold']
             else:
                 self.movement_status[tracker_id] = False 
+        
+        # Cleanup stale tracker IDs
+        active_ids = set(detections.tracker_id)
+
+        # Remove inactive entries from movement_status
+        stale_ids = set(self.movement_status.keys()) - active_ids
+        for tid in stale_ids:
+            del self.movement_status[tid]
+        
+        # Remove inactive entries from movement_status
+        stale_ids = set(self.track_history.keys()) - active_ids
+        for tid in stale_ids:
+            del self.track_history[tid]
+
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         """

@@ -26,13 +26,13 @@ def parse_arguments():
     )
     parser.add_argument(
         "--confidence_threshold",
-        default=0.3,
+        default=0.5,
         help="Confidence threshold for the model",
         type=float,
     )
     parser.add_argument(
         "--iou_threshold",
-        default=0.9,
+        default=0.8,
         help="IOU threshold for the model",
         type=float,
     )
