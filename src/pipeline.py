@@ -2,6 +2,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
+import onnxruntime as ort
 import supervision as sv
 from tqdm import tqdm
 from ultralytics import YOLO
@@ -46,6 +47,8 @@ class TrackingPipeline:
         #     trace_length=100,
         #     thickness=ANNOTATION_CONFIG['tracking_line_thickness'],
         # )
+        # Model color recognition
+        self.color_model = ort.InferenceSession("models/custom/color_classifier.onnx")
 
     def process_video(self):
         """
@@ -78,18 +81,19 @@ class TrackingPipeline:
         cv2.destroyAllWindows()
 
     def annotate_frame(
-        self, frame: np.ndarray, detections: sv.Detections
+        self, frame: np.ndarray, detections: sv.Detections, colors: list
     ) -> np.ndarray:
         """
         """
         annotated_frame = frame.copy()
 
         labels = [
-            f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id]} {conf:.2f}"
-            for track_id, class_id, conf in zip(
+            f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id]} {color} {conf:.2f}"
+            for track_id, class_id, conf, color in zip(
                 detections.tracker_id, 
                 detections.class_id, 
-                detections.confidence
+                detections.confidence,
+                colors,
             )
         ]
 
@@ -134,6 +138,13 @@ class TrackingPipeline:
         detections = sv.Detections.from_ultralytics(results)
          
         detections = self.tracker.update_with_detections(detections)
+
+        colors = [
+            self.predict_color(frame, box) 
+            if self.is_vehicle(class_id) 
+            else "none"
+            for box, class_id in zip(detections.xyxy, detections.class_id)
+        ]
         
         # Debug: Print detections structure
         print("Detections:", detections)
@@ -145,5 +156,38 @@ class TrackingPipeline:
         # Update history
         self.update_tracking_history(detections)
         
-        return self.annotate_frame(frame, detections)
+        return self.annotate_frame(frame, detections, colors)
+    
+    def predict_color(self, frame: np.ndarray, box: np.ndarray) -> str:
+        x1, y1, x2, y2 = box.astype(int)
+        vehicle_roi = frame[y1:y2, x1:x2]
+        
+        if vehicle_roi.size == 0:
+            return "unknown"
+        
+        # Convert to PIL-style RGB
+        processed = cv2.cvtColor(vehicle_roi, cv2.COLOR_BGR2RGB)
+        processed = cv2.resize(processed, (224, 224))
+        
+        # Convert to float32 and normalize
+        processed = processed.astype(np.float32) / 255.0  # Critical: float32 conversion
+        
+        # ImageNet normalization (ensure values are float32)
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        processed = (processed - mean) / std
+        
+        # Change dimension order to CHW + add batch dimension
+        processed = processed.transpose(2, 0, 1)  # HWC to CHW
+        processed = np.expand_dims(processed, axis=0)
+        
+        outputs = self.color_model.run(
+            output_names=[self.color_model.get_outputs()[0].name],
+            input_feed={self.color_model.get_inputs()[0].name: processed}
+        )
+        return ANNOTATION_CONFIG["color_classes"][np.argmax(outputs[0])]
+    
+    # ADD TO TrackingPipeline CLASS
+    def is_vehicle(self, class_id: int) -> bool:
+        return class_id in [2, 3, 5, 7]  # cars, motorcycles, buses, trucks
 

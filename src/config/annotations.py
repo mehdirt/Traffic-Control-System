@@ -14,5 +14,10 @@ ANNOTATION_CONFIG = {
         3: "motorcycle",
         5: "bus",
         7: "truck",
-    }
+    },
+    "color_classes": [
+        "beige", "black", "blue", "brown", "gold",
+        "green", "grey", "orange", "pink", "purple",
+        "red", "silver", "tan", "white", "yellow",
+    ],
 }

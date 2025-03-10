@@ -14,7 +14,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--source_video_path",
-        required=True,
+        default=0,
         help="Path to the source video file",
         type=str,
     )
