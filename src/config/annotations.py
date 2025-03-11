@@ -4,7 +4,14 @@ ANNOTATION_CONFIG = {
     "box_thickness": 2,
     "text_scale": 0.5,
     "text_thickness": 1,
-    "color_palette": sv.ColorPalette.from_hex(["#E6194B", "#3CB44B", "#FFE119", "#3C76D1", "#d13cb8", "#3cd1cf"]),
+    "color_palette": sv.ColorPalette.from_hex([
+        "#E6194B",
+        "#3CB44B",
+        "#FFE119",
+        "#3C76D1",
+        "#d13cb8",
+        "#3cd1cf",
+        ]),
     "tracking_line_thickness": 2,
     "tracking_history_length": 30,
     "class_mapping": {
@@ -20,4 +27,5 @@ ANNOTATION_CONFIG = {
         "GREEN", "GREY", "ORANGE", "PINK", "PURPLE",
         "RED", "SILVER", "TAN", "WHITE", "YELLOW",
     ],
+    "emergency_classes": ["EMERGENCY", "NON_EMERGENCY"]
 }

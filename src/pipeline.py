@@ -12,6 +12,8 @@ from config.annotations import ANNOTATION_CONFIG
 
 
 class TrackingPipeline:
+    """
+    """
     def __init__(
         self,
         source_weights_path: str,
@@ -40,34 +42,18 @@ class TrackingPipeline:
         self.label_annotator = sv.LabelAnnotator(
             color=ANNOTATION_CONFIG['color_palette'], text_color=sv.Color.BLACK
         )
-        # Trace Annotator
-        # self.trace_annotator = sv.TraceAnnotator(
-        #     color=ANNOTATION_CONFIG['color_palette'],
-        #     position=sv.Position.CENTER,
-        #     trace_length=100,
-        #     thickness=ANNOTATION_CONFIG['tracking_line_thickness'],
-        # )
-        # Model color recognition
+
+        # Model: Color recognition
         self.color_model = ort.InferenceSession("models/custom/color_classifier.onnx")
         # Track movement state per object
-        self.movement_status = {} 
+        self.movement_status = {}
+        
+        # Model: Emergency detector
+        self.emergency_model = ort.InferenceSession("models/custom/emergency_detector.onnx")
 
     def process_video(self):
         """
         """
-        # if self.target_video_path:
-        #     with sv.VideoSink(self.target_video_path, self.video_info) as sink:
-        #         for frame in tqdm(frame_generator, total=self.video_info.total_frames):
-        #             annotated_frame = self.process_frame(frame)
-        #             sink.write_frame(annotated_frame)
-        # else:
-        #     for frame in tqdm(frame_generator, total=self.video_info.total_frames):
-        #         annotated_frame = self.process_frame(frame)
-        #         cv2.imshow("Processed Video", annotated_frame)
-        #         if cv2.waitKey(1) & 0xFF == ord("q"):
-        #             break
-        #     cv2.destroyAllWindows()
-        
         cap = cv2.VideoCapture(self.source_video_path if self.source_video_path != "0" else 0)
         while cap.isOpened():
             success, frame = cap.read()
@@ -83,22 +69,46 @@ class TrackingPipeline:
         cv2.destroyAllWindows()
 
     def annotate_frame(
-        self, frame: np.ndarray, detections: sv.Detections, colors: list
+        self, frame: np.ndarray,
+        detections: sv.Detections,
+        colors: list,
+        emergency_status
     ) -> np.ndarray:
         """
         """
         annotated_frame = frame.copy()
 
+        # labels = []
+        # box_colors = []
+
+        # for idx, (track_id, class_id, conf, color) in enumerate(zip(
+        #     detections.tracker_id, 
+        #     detections.class_id,
+        #     detections.confidence,
+        #     colors)
+        #     ):
+        #     if emergency_status[idx] == "emergency":
+        #         color = (0, 0, 255)
+        #         label = f"#{track_id} EMERGENCY {conf:.2f}"
+        #     else:
+        #         color = ANNOTATION_CONFIG['color_palette'].by_idx(class_id)
+        #         label = f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id]} \
+        #         {color} {' <MOVING> ' if self.movement_status.get(track_id, False) else ' <STABLE> '} \
+        #         {conf:.2f}"
+
+        #     labels.append(label)
+        #     box_colors.append(color)
+
         labels = [
-            f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id]} {color}"
+            f"#{track_id} {ANNOTATION_CONFIG['class_mapping'][class_id] if emergency_status[idx] != 'emergency' else 'EMERGENCY'} {color}"
             f"{' <MOVING> ' if self.movement_status.get(track_id, False) else ' <STABLE> '}"
             f"{conf:.2f}"
-            for track_id, class_id, conf, color in zip(
+            for idx, (track_id, class_id, conf, color) in enumerate(zip(
                 detections.tracker_id, 
                 detections.class_id,
                 detections.confidence,
                 colors,
-            )
+            ))
         ]
 
         annotated_frame = self.label_annotator.annotate(
@@ -108,12 +118,9 @@ class TrackingPipeline:
         )
         annotated_frame = self.box_annotator.annotate(
             scene=annotated_frame,
-            detections=detections
+            detections=detections,
+            # custom_color_lookup=box_colors,
         )
-        # annotated_frame = self.trace_annotator.annotate(
-        #     scene=annotated_frame,
-        #     detections=detections
-        # )
 
         return annotated_frame
     
@@ -170,9 +177,18 @@ class TrackingPipeline:
          
         detections = self.tracker.update_with_detections(detections)
 
+        # Color predictions        
         colors = [
             self.predict_color(frame, box) 
             if self.is_vehicle(class_id) 
+            else ""
+            for box, class_id in zip(detections.xyxy, detections.class_id)
+        ]
+
+        # Emergency predictions
+        emergency_status = [
+            self.predict_emergency(frame, box)
+            if self.is_emergency_vehicle(class_id)
             else ""
             for box, class_id in zip(detections.xyxy, detections.class_id)
         ]
@@ -187,9 +203,11 @@ class TrackingPipeline:
         # Update history
         self.update_tracking_history(detections)
         
-        return self.annotate_frame(frame, detections, colors)
+        return self.annotate_frame(frame, detections, colors, emergency_status)
     
     def predict_color(self, frame: np.ndarray, box: np.ndarray) -> str:
+        """
+        """
         x1, y1, x2, y2 = box.astype(int)
         vehicle_roi = frame[y1:y2, x1:x2]
         
@@ -220,5 +238,44 @@ class TrackingPipeline:
     
     # ADD TO TrackingPipeline CLASS
     def is_vehicle(self, class_id: int) -> bool:
+        """
+        """
         return class_id in [2, 3, 5, 7]  # cars, motorcycles, buses, trucks
+    
+    def predict_emergency(self, frame: np.ndarray, box: np.ndarray) -> str:
+        """
+        """
+        x1, y1, x2, y2 = box.astype(int)
+        vehicle_roi = frame[y1:y2, x1:x2]
+
+        if vehicle_roi.size == 0:
+            return ""
+        
+        # Convert to PIL-style RGB
+        processed = cv2.cvtColor(vehicle_roi, cv2.COLOR_BGR2RGB)
+        processed = cv2.resize(processed, (224, 224))
+        
+        # Convert to float32 and normalize
+        processed = processed.astype(np.float32) / 255.0  
+        
+        # ImageNet normalization
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        processed = (processed - mean) / std
+        
+        # Change dimension order to CHW + add batch dimension
+        processed = processed.transpose(2, 0, 1)  # HWC to CHW
+        processed = np.expand_dims(processed, axis=0)
+        
+        outputs = self.emergency_model.run(
+            output_names=[self.emergency_model.get_outputs()[0].name],
+            input_feed={self.emergency_model.get_inputs()[0].name: processed}
+        )
+        return ANNOTATION_CONFIG["emergency_classes"][np.argmax(outputs[0])]    
+
+    def is_emergency_vehicle(self, class_id: int) -> bool:
+        """
+        """
+        return class_id in [2, 5, 7]  # cars, bus-like ones, trucks
+
 
