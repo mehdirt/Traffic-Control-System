@@ -175,7 +175,7 @@ cython_debug/
 
 # Pretrained models
 models/pretrained/*.pt
-# models/custom/*.onnx
+models/custom/*.onnx
 
 # Sample Vidoes
 assets/*.mp4
