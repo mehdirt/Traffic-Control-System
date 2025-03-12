@@ -174,8 +174,8 @@ cython_debug/
 .pypirc
 
 # Pretrained models
-models/pretrained/*.pt
-models/custom/*.onnx
+# models/pretrained/*.pt
+# models/custom/*.onnx
 
 # Sample Vidoes
 assets/*.mp4
