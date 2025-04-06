@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, List
 
 import cv2
@@ -59,6 +60,8 @@ class TrackingPipeline:
         self.source_video_path = source_video_path
         self.target_video_path = target_video_path
         self.track_history = {}
+        # Track movement state per object
+        self.movement_status = {}
         # Model
         self.model = YOLO(source_weights_path)
         # Tracker
@@ -74,14 +77,10 @@ class TrackingPipeline:
         self.label_annotator = sv.LabelAnnotator(
             color=ANNOTATION_CONFIG['color_palette'], text_color=sv.Color.BLACK
         )
-
         # Model: Color recognition
         self.color_model = ort.InferenceSession(
             "models/custom/color_classifier.onnx"
             )
-        # Track movement state per object
-        self.movement_status = {}
-        
         # Model: Emergency detector
         self.emergency_model = ort.InferenceSession(
             "models/custom/emergency_detector.onnx"
@@ -113,6 +112,55 @@ class TrackingPipeline:
         cap.release()
         cv2.destroyAllWindows()
 
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Process a single frame through the pipeline.
+
+        This method:
+        1. Runs object detection
+        2. Updates tracking
+        3. Predicts vehicle colors
+        4. Detects emergency vehicles
+        5. Updates tracking history
+        6. Annotates the frame
+
+        Args:
+            frame (np.ndarray): Input frame to process
+
+        Returns:
+            np.ndarray: Processed and annotated frame
+        """
+        results = self.model(
+            source=frame,
+            verbose=False,
+            conf=self.conf_threshold,
+            iou=self.iou_threshold,
+            classes=TRACKING_CONFIG["allowed_classes"],
+        )[0]
+        
+        detections = sv.Detections.from_ultralytics(results)
+        detections = self.tracker.update_with_detections(detections)
+
+        # Color predictions        
+        colors = [
+            self.predict_color(frame, box)
+            if self.is_vehicle(class_id)
+            else ""
+            for box, class_id in zip(detections.xyxy, detections.class_id)
+        ]
+
+        # Emergency predictions
+        emergency_status = [
+            self.predict_emergency(frame, box)
+            if self.is_emergency_vehicle(class_id)
+            else ""
+            for box, class_id in zip(detections.xyxy, detections.class_id)
+        ]
+
+        # Update history
+        self.update_tracking_history(detections)
+        
+        return self.annotate_frame(frame, detections, colors, emergency_status)
+
     def annotate_frame(
         self,
         frame: np.ndarray,
@@ -137,9 +185,9 @@ class TrackingPipeline:
                 "#{} {} {} {} {:.2f}".format(
                     track_id,
                     ANNOTATION_CONFIG['class_mapping'][class_id],
-                    'EMERGENCY' if emergency_status[idx] == 'emergency' 
+                    'EMERGENCY' if emergency_status[idx] == 'emergency'
                     else color,
-                    '<MOVING>' if self.movement_status.get(track_id, False) 
+                    '<MOVING>' if self.movement_status.get(track_id, False)
                     else '<STABLE>',
                     conf
                 )
@@ -154,6 +202,9 @@ class TrackingPipeline:
             )
         ]
 
+        print(f"colors: {colors}")
+        print(f"Detections cls_id: {detections.class_id}")
+
         annotated_frame = self.label_annotator.annotate(
             scene=annotated_frame,
             detections=detections,
@@ -163,6 +214,10 @@ class TrackingPipeline:
             scene=annotated_frame,
             detections=detections,
         )
+
+        # Count and display object counts
+        counts = self.count_objects(detections)
+        annotated_frame = self.display_counts(annotated_frame, counts)
 
         return annotated_frame
     
@@ -178,7 +233,7 @@ class TrackingPipeline:
         Args:
             detections (sv.Detections): Current frame detections
         """
-        # Store object's id and centeroid
+        # Store object's id and centroid
         for tracker_id, [x1, y1, x2, y2] in zip(detections.tracker_id, detections.xyxy):
             center = ((x1 + x2) // 2, (y1 + y2) // 2)
             self.track_history.setdefault(tracker_id, []).append(center)
@@ -211,56 +266,47 @@ class TrackingPipeline:
         stale_ids = set(self.track_history.keys()) - active_ids
         for tid in stale_ids:
             del self.track_history[tid]
-
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Process a single frame through the pipeline.
-
-        This method:
-        1. Runs object detection
-        2. Updates tracking
-        3. Predicts vehicle colors
-        4. Detects emergency vehicles
-        5. Updates tracking history
-        6. Annotates the frame
+    
+    def count_objects(self, detections: sv.Detections) -> dict:
+        """Count the number of objects by class in the current frame.
 
         Args:
-            frame (np.ndarray): Input frame to process
+            detections (sv.Detections): Current frame detections
 
         Returns:
-            np.ndarray: Processed and annotated frame
+            dict: Dictionary mapping class names to their counts
         """
-        results = self.model(
-            source=frame,
-            verbose=False,
-            conf=self.conf_threshold,
-            iou=self.iou_threshold,
-            classes=TRACKING_CONFIG["allowed_classes"],
-        )[0]
-        
-        detections = sv.Detections.from_ultralytics(results)
-        detections = self.tracker.update_with_detections(detections)
+        counts = {}
+        for class_id in detections.class_id:
+            class_name = ANNOTATION_CONFIG['class_mapping'][class_id]
+            counts[class_name] = counts.get(class_name, 0) + 1
+        return counts
 
-        # Color predictions        
-        colors = [
-            self.predict_color(frame, box) 
-            if self.is_vehicle(class_id) 
-            else ""
-            for box, class_id in zip(detections.xyxy, detections.class_id)
-        ]
+    def display_counts(self, frame: np.ndarray, counts: dict) -> np.ndarray:
+        """Display object counts on the frame.
 
-        # Emergency predictions
-        emergency_status = [
-            self.predict_emergency(frame, box)
-            if self.is_emergency_vehicle(class_id)
-            else ""
-            for box, class_id in zip(detections.xyxy, detections.class_id)
-        ]
+        Args:
+            frame (np.ndarray): Input frame
+            counts (dict): Dictionary of class names and their counts
 
-        # Update history
-        self.update_tracking_history(detections)
-        
-        return self.annotate_frame(frame, detections, colors, emergency_status)
-    
+        Returns:
+            np.ndarray: Frame with counts displayed
+        """
+        y_position = 30
+        for class_name, count in counts.items():
+            text = f"{class_name}: {count}"
+            cv2.putText(
+                frame,
+                text,
+                (10, y_position),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2
+            )
+            y_position += 30
+        return frame
+
     def predict_color(self, frame: np.ndarray, box: np.ndarray) -> str:
         """Predict the color of a vehicle in the given bounding box.
 

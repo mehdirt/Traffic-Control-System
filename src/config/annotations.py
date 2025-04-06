@@ -13,7 +13,7 @@ ANNOTATION_CONFIG = {
         "#3cd1cf",
         ]),
     "tracking_line_thickness": 2,
-    "tracking_history_length": 30,
+    "tracking_history_length": 50,
     "class_mapping": {
         0: "Person",
         1: "Bicycle",
