@@ -18,7 +18,6 @@ class TrackingPipeline:
     - Object detection using YOLO
     - Object tracking using ByteTrack
     - Vehicle color classification
-    - Emergency vehicle detection
     - Movement state tracking
     - Video annotation and visualization
 
@@ -35,7 +34,6 @@ class TrackingPipeline:
         label_annotator (sv.LabelAnnotator): Annotator for drawing labels
         color_model (ort.InferenceSession): ONNX model for color classification
         movement_status (dict): Movement state of tracked objects
-        emergency_model (ort.InferenceSession): ONNX model for emergency detection
     """
 
     def __init__(
@@ -81,10 +79,6 @@ class TrackingPipeline:
         self.color_model = ort.InferenceSession(
             "models/custom/color_classifier.onnx"
             )
-        # Model: Emergency detector
-        self.emergency_model = ort.InferenceSession(
-            "models/custom/emergency_detector.onnx"
-            )
 
     def process_video(self) -> None:
         """Process the input video stream.
@@ -119,9 +113,8 @@ class TrackingPipeline:
         1. Runs object detection
         2. Updates tracking
         3. Predicts vehicle colors
-        4. Detects emergency vehicles
-        5. Updates tracking history
-        6. Annotates the frame
+        4. Updates tracking history
+        5. Annotates the frame
 
         Args:
             frame (np.ndarray): Input frame to process
@@ -148,25 +141,16 @@ class TrackingPipeline:
             for box, class_id in zip(detections.xyxy, detections.class_id)
         ]
 
-        # Emergency predictions
-        emergency_status = [
-            self.predict_emergency(frame, box)
-            if self.is_emergency_vehicle(class_id)
-            else ""
-            for box, class_id in zip(detections.xyxy, detections.class_id)
-        ]
-
         # Update history
         self.update_tracking_history(detections)
         
-        return self.annotate_frame(frame, detections, colors, emergency_status)
+        return self.annotate_frame(frame, detections, colors)
 
     def annotate_frame(
         self,
         frame: np.ndarray,
         detections: sv.Detections,
-        colors: List[str],
-        emergency_status: List[str]
+        colors: List[str]
     ) -> np.ndarray:
         """Annotate a frame with detection and tracking information.
 
@@ -174,7 +158,6 @@ class TrackingPipeline:
             frame (np.ndarray): Input frame to annotate
             detections (sv.Detections): Detection results from YOLO
             colors (List[str]): Predicted colors for each vehicle
-            emergency_status (List[str]): Emergency status for each vehicle
 
         Returns:
             np.ndarray: Annotated frame with bounding boxes and labels
@@ -185,8 +168,7 @@ class TrackingPipeline:
                 "#{} {} {} {} {:.2f}".format(
                     track_id,
                     ANNOTATION_CONFIG['class_mapping'][class_id],
-                    'EMERGENCY' if emergency_status[idx] == 'emergency'
-                    else color,
+                    color,
                     '<MOVING>' if self.movement_status.get(track_id, False)
                     else '<STABLE>',
                     conf
@@ -354,53 +336,5 @@ class TrackingPipeline:
         Returns:
             bool: True if the object is a vehicle, False otherwise
         """
-        return class_id in [2, 3, 5, 7]  # cars, motorcycles, buses, trucks
-    
-    def predict_emergency(self, frame: np.ndarray, box: np.ndarray) -> str:
-        """Predict if a vehicle is an emergency vehicle.
+        return class_id in [2, 3, 5, 7]  # cars, motorcycles, buses, trucks  
 
-        Args:
-            frame (np.ndarray): Input frame
-            box (np.ndarray): Bounding box coordinates [x1, y1, x2, y2]
-
-        Returns:
-            str: Emergency status ('emergency' or '')
-        """
-        x1, y1, x2, y2 = box.astype(int)
-        vehicle_roi = frame[y1:y2, x1:x2]
-
-        if vehicle_roi.size == 0:
-            return ""
-        
-        # Convert to PIL-style RGB
-        processed = cv2.cvtColor(vehicle_roi, cv2.COLOR_BGR2RGB)
-        processed = cv2.resize(processed, (224, 224))
-        
-        # Convert to float32 and normalize
-        processed = processed.astype(np.float32) / 255.0
-        
-        # ImageNet normalization
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        processed = (processed - mean) / std
-        
-        # Change dimension order to CHW + add batch dimension
-        processed = processed.transpose(2, 0, 1)  # HWC to CHW
-        processed = np.expand_dims(processed, axis=0)
-        
-        outputs = self.emergency_model.run(
-            output_names=[self.emergency_model.get_outputs()[0].name],
-            input_feed={self.emergency_model.get_inputs()[0].name: processed}
-        )
-        return ANNOTATION_CONFIG["emergency_classes"][np.argmax(outputs[0])]    
-
-    def is_emergency_vehicle(self, class_id: int) -> bool:
-        """Check if a vehicle class could be an emergency vehicle.
-
-        Args:
-            class_id (int): YOLO class ID
-
-        Returns:
-            bool: True if the vehicle type could be emergency, False otherwise
-        """
-        return class_id in [2, 5, 7]  # cars, bus-like ones, trucks
