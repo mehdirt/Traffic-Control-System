@@ -1,12 +1,11 @@
 # Traffic Control System
 
-A sophisticated computer vision-based traffic monitoring and control system that leverages state-of-the-art object detection and tracking algorithms to analyze and manage traffic flow in real-time.
+A sophisticated computer vision-based traffic monitoring and control system leverages state-of-the-art object detection and tracking algorithms to analyze and manage traffic flow in real-time.
 
 ## 🚀 Features
 
 - Real-time object detection and tracking using YOLO and ByteTrack
-- Vehicle color classification using custom ONNX model
-- Emergency vehicle detection and classification
+- Vehicle color classification using a custom ONNX model
 - Object movement state tracking and history
 - Real-time video annotation with bounding boxes and labels
 - Object counting and classification
@@ -72,10 +71,6 @@ traffic-control-system/
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 📞 Support
-
-For support, please open an issue in the GitHub repository or contact the maintainers.
 
 ## 🙏 Acknowledgments
 
